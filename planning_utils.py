@@ -1,6 +1,47 @@
 from enum import Enum
 from queue import PriorityQueue
 import numpy as np
+from shapely.geometry import Polygon
+
+SQRT2 = np.sqrt(2.0)
+
+
+def find_start_goal(skel, start, goal):
+    skel_cells = np.transpose(skel.nonzero())
+    start_min_dist = np.linalg.norm(np.array(start) - np.array(skel_cells), axis=1).argmin()
+    near_start = skel_cells[start_min_dist]
+    goal_min_dist = np.linalg.norm(np.array(goal) - np.array(skel_cells), axis=1).argmin()
+    near_goal = skel_cells[goal_min_dist]
+
+    return near_start, near_goal
+
+
+def collinear(p1, p2, p3):
+    det = p1[0] * (p2[1] - p3[1]) + p2[0] * (p3[1] - p1[1]) + p3[0] * (p1[1] - p2[1])
+    return det == 0
+
+
+def zigzag(*points):
+    p = Polygon(points)
+    return p.area <= 1e-7
+
+
+def prune(path):
+
+    keep = [True] * len(path)
+    for i in range(1, len(path)-3):
+        if zigzag(*path[i-1:i+3]):
+            keep[i] = False
+            keep[i+1] = False
+    path = [p for k, p in zip(keep, path) if k]
+
+    keep = [True] * len(path)
+    for i in range(1, len(path)-2):
+        if collinear(path[i-1], path[i], path[i+1]):
+            keep[i] = False
+    path = [p for k, p in zip(keep, path) if k]
+
+    return path
 
 
 def create_grid(data, drone_altitude, safety_distance):
@@ -55,6 +96,10 @@ class Action(Enum):
     EAST = (0, 1, 1)
     NORTH = (-1, 0, 1)
     SOUTH = (1, 0, 1)
+    NORTHWEST = (-1, -1, SQRT2)
+    NORTHEAST = (-1, 1, SQRT2)
+    SOUTHWEST = (1, -1, SQRT2)
+    SOUTHEAST = (1, 1, SQRT2)
 
     @property
     def cost(self):
@@ -62,7 +107,7 @@ class Action(Enum):
 
     @property
     def delta(self):
-        return (self.value[0], self.value[1])
+        return self.value[0], self.value[1]
 
 
 def valid_actions(grid, current_node):
@@ -84,6 +129,14 @@ def valid_actions(grid, current_node):
         valid_actions.remove(Action.WEST)
     if y + 1 > m or grid[x, y + 1] == 1:
         valid_actions.remove(Action.EAST)
+    if (x - 1 < 0 and y - 1 < 0) or (grid[x - 1, y] == 1 and grid[x, y - 1] == 1):
+        valid_actions.remove(Action.NORTHWEST)
+    if (x - 1 < 0 and y + 1 > m) or (grid[x - 1, y] == 1 and grid[x, y + 1] == 1):
+        valid_actions.remove(Action.NORTHEAST)
+    if (x + 1 > n and y - 1 < 0) or (grid[x + 1, y] == 1 and grid[x, y - 1] == 1):
+        valid_actions.remove(Action.SOUTHWEST)
+    if (x + 1 > n and y + 1 > m) or (grid[x + 1, y] == 1 and grid[x, y + 1] == 1):
+        valid_actions.remove(Action.SOUTHEAST)
 
     return valid_actions
 
@@ -140,7 +193,5 @@ def a_star(grid, h, start, goal):
     return path[::-1], path_cost
 
 
-
 def heuristic(position, goal_position):
     return np.linalg.norm(np.array(position) - np.array(goal_position))
-
